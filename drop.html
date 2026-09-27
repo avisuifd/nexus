@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1013">
+<meta name="nexus-drop-page" content="1">
+<meta name="referrer" content="no-referrer">
+<title>NEXUS Drop</title>
+<!--
+  NEXUS Drop — phone page for Phone Drop's internet mode.
+  Upload this file to your GitHub repository and turn on GitHub Pages (see the
+  NEXUS README). The key in the link after "#" never leaves your phone and PC;
+  everything is end-to-end encrypted and passed through the free ntfy.sh relay.
+-->
+<style>
+  :root { color-scheme: light dark; --bg: #f3f3f5; --card: #fff; --text: #16171b; --muted: #6b6f78; --line: #e4e5e9; --accent: #5b61e0; --ok: #1f9d55; --bad: #d13b41; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #0f1013; --card: #17181c; --text: #eeeff2; --muted: #8b8f98; --line: #26282e; --accent: #7c82f5; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); }
+  header { display: flex; align-items: center; gap: 12px; margin: 8px 0 18px; }
+  .mark { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: var(--card); border: 1px solid var(--line); font-weight: 700; }
+  h1 { font-size: 22px; margin: 0; }
+  .sub { color: var(--muted); font-size: 14px; display: flex; align-items: center; gap: 6px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .dot.on { background: var(--ok); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 16px; margin-bottom: 14px; }
+  h2 { font-size: 15px; margin: 0 0 12px; color: var(--muted); font-weight: 600; }
+  textarea { width: 100%; min-height: 84px; padding: 12px; border-radius: 12px; border: 1px solid var(--line); background: transparent; color: inherit; font: inherit; resize: vertical; }
+  button, .btn { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 48px; margin-top: 10px; padding: 0 16px; border-radius: 12px; border: 1px solid var(--line); background: transparent; color: inherit; font: inherit; font-weight: 600; cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .5; }
+  .status { margin-top: 10px; font-size: 14px; color: var(--muted); min-height: 1em; }
+  .status.ok { color: var(--ok); } .status.bad { color: var(--bad); }
+  ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+  li { display: flex; align-items: center; gap: 12px; }
+  li .body { flex: 1; min-width: 0; }
+  li .name { overflow-wrap: anywhere; }
+  li .meta { font-size: 12px; color: var(--muted); }
+  li button { width: auto; min-height: 36px; margin: 0; padding: 0 12px; font-size: 14px; }
+  li img { width: 52px; height: 52px; object-fit: cover; border-radius: 10px; }
+  .empty { color: var(--muted); font-size: 14px; }
+  .progress { height: 4px; border-radius: 4px; background: var(--line); overflow: hidden; margin-top: 10px; display: none; }
+  .progress i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+  .note { font-size: 12px; color: var(--muted); text-align: center; margin-top: 18px; }
+  #nokey { display: none; }
+  body.nokey main { display: none; } body.nokey #nokey { display: block; }
+</style>
+</head>
+<body>
+<header>
+  <div class="mark">N</div>
+  <div><h1>NEXUS Drop</h1><div class="sub"><i class="dot" id="dot"></i><span id="sub">Connecting…</span></div></div>
+</header>
+<main>
+  <section class="card">
+    <h2>Send to your PC</h2>
+    <textarea id="text" placeholder="Type or paste text or a link…" maxlength="3000"></textarea>
+    <button class="primary" id="sendText" type="button">Send text</button>
+    <label class="btn" for="files">Choose photos or files</label>
+    <input type="file" id="files" multiple hidden>
+    <div class="progress" id="progress"><i></i></div>
+    <div class="status" id="status"></div>
+  </section>
+  <section class="card">
+    <h2>From your PC</h2>
+    <ul id="inbox"><li class="empty">Things you drop onto the Phone Drop widget show up here.</li></ul>
+  </section>
+  <section class="card">
+    <h2>Sent from this phone</h2>
+    <ul id="sent"><li class="empty">Nothing yet.</li></ul>
+  </section>
+  <div class="note">🔒 End-to-end encrypted · works on Wi-Fi or mobile data<br>Tip: add this page to your home screen.</div>
+</main>
+<div id="nokey" class="card">This link is incomplete. Open NEXUS on your PC and scan the Phone Drop QR code again.</div>
+<script>
+(async () => {
+  const $ = (id) => document.getElementById(id);
+  const params = new URLSearchParams(location.hash.slice(1));
+  const SERVER = (params.get('s') || 'https://ntfy.sh').replace(/\/$/, '');
+  const PC = params.get('n') || 'your PC';
+  const CHUNK = 1900000, MAX_FILE = 15 * 1024 * 1024;
+  const te = new TextEncoder(), td = new TextDecoder();
+  const b64u = {
+    enc(bytes) { let s = ''; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000)); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); },
+    dec(str) { try { const s = atob(str.replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(s, (c) => c.charCodeAt(0)); } catch { return null; } },
+  };
+  const raw = b64u.dec(params.get('k') || '');
+  if (!raw || raw.length !== 32 || !window.crypto?.subtle) { document.body.classList.add('nokey'); return; }
+
+  // Keys: HKDF-SHA256(secret) → relay topic + AES-256-GCM key (same as NEXUS on the PC)
+  const salt = te.encode('nexus-drop-v1');
+  const ikm = await crypto.subtle.importKey('raw', raw, 'HKDF', false, ['deriveBits', 'deriveKey']);
+  const topicBits = new Uint8Array(await crypto.subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt, info: te.encode('topic') }, ikm, 96));
+  const topic = 'nexusdrop_' + Array.from(topicBits, (b) => b.toString(16).padStart(2, '0')).join('');
+  const key = await crypto.subtle.deriveKey({ name: 'HKDF', hash: 'SHA-256', salt, info: te.encode('key') }, ikm, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  const seal = async (bytes) => { const iv = crypto.getRandomValues(new Uint8Array(12)); const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, bytes)); const out = new Uint8Array(12 + ct.length); out.set(iv); out.set(ct, 12); return out; };
+  const unseal = async (bytes) => { try { return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: bytes.subarray(0, 12) }, key, bytes.subarray(12))); } catch { return null; } };
+  const wire = async (obj) => 'd1.' + b64u.enc(await seal(te.encode(JSON.stringify({ ...obj, from: 'phone', at: Date.now() }))));
+  const unwire = async (s) => { if (typeof s !== 'string' || !s.startsWith('d1.')) return null; const b = b64u.dec(s.slice(3)); const p = b && await unseal(b); try { return p ? JSON.parse(td.decode(p)) : null; } catch { return null; } };
+  const hex = (buf) => Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, '0')).join('');
+  const uid = () => hex(crypto.getRandomValues(new Uint8Array(8)));
+  const fmt = (n) => n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+  const say = (msg, cls) => { $('status').textContent = msg; $('status').className = 'status ' + (cls || ''); };
+  const progress = (f) => { $('progress').style.display = f == null ? 'none' : 'block'; $('progress').firstElementChild.style.width = ((f || 0) * 100) + '%'; };
+
+  async function publish(payload, attachment) {
+    const msg = await wire(payload);
+    const url = `${SERVER}/${topic}?firebase=no`;
+    const res = attachment
+      ? await fetch(`${url}&filename=nexus.bin&message=${encodeURIComponent(msg)}`, { method: 'PUT', body: attachment })
+      : await fetch(url, { method: 'POST', body: msg });
+    if (res.status === 429) throw new Error('The free relay’s daily limit was reached — try again tomorrow.');
+    if (!res.ok) throw new Error('The relay returned an error (' + res.status + ').');
+  }
+
+  /* -------------------------------------------------------- sent list */
+  const sent = [];
+  function renderSent() {
+    const ul = $('sent');
+    if (!sent.length) return;
+    ul.replaceChildren(...sent.slice(0, 20).map((s) => {
+      const li = document.createElement('li');
+      const body = document.createElement('div'); body.className = 'body';
+      const name = document.createElement('div'); name.className = 'name'; name.textContent = s.label;
+      const meta = document.createElement('div'); meta.className = 'meta';
+      meta.textContent = s.status === 'delivered' ? '✓✓ On your PC' : s.status === 'sent' ? '✓ Sent' : s.status === 'failed' ? '⚠ ' + s.error : 'Sending…';
+      body.append(name, meta); li.append(body); return li;
+    }));
+  }
+
+  $('sendText').onclick = async () => {
+    const text = $('text').value.trim();
+    if (!text) return;
+    const item = { id: uid(), label: text.length > 80 ? text.slice(0, 80) + '…' : text, status: 'sending' };
+    sent.unshift(item); renderSent();
+    $('sendText').disabled = true;
+    try { await publish({ t: 'text', id: item.id, text }); item.status = 'sent'; $('text').value = ''; say('Sent to ' + PC + ' ✓', 'ok'); }
+    catch (e) { item.status = 'failed'; item.error = e.message; say(e.message, 'bad'); }
+    $('sendText').disabled = false; renderSent();
+  };
+
+  async function shrinkPhoto(file) {
+    try {
+      const bmp = await createImageBitmap(file);
+      const scale = Math.min(1, 2560 / Math.max(bmp.width, bmp.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale);
+      c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+      for (const q of [0.86, 0.72, 0.6]) {
+        const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', q));
+        if (blob && blob.size <= CHUNK - 64) return new File([blob], file.name.replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' });
+      }
+    } catch { /* not decodable here — send as is */ }
+    return file;
+  }
+
+  $('files').onchange = async () => {
+    const files = [...$('files').files];
+    $('files').value = '';
+    let ok = 0;
+    for (let f of files) {
+      if (/^image\/(jpeg|png|webp|heic|heif)/i.test(f.type) && f.size > CHUNK - 64) f = await shrinkPhoto(f);
+      const item = { id: uid(), label: f.name + ' · ' + fmt(f.size), status: 'sending' };
+      sent.unshift(item); renderSent();
+      if (f.size > MAX_FILE) { item.status = 'failed'; item.error = 'Too big — internet mode sends files up to 15 MB'; renderSent(); continue; }
+      try {
+        const data = new Uint8Array(await f.arrayBuffer());
+        const sha = hex(await crypto.subtle.digest('SHA-256', data));
+        const n = Math.max(1, Math.ceil(data.length / CHUNK));
+        for (let i = 0; i < n; i++) {
+          say(`Sending ${f.name}${n > 1 ? ` (${i + 1}/${n})` : ''}…`); progress(i / n);
+          await publish({ t: 'part', id: item.id, i, n, name: f.name, size: data.length, mime: f.type, sha }, await seal(data.subarray(i * CHUNK, (i + 1) * CHUNK)));
+        }
+        item.status = 'sent'; ok++;
+      } catch (e) { item.status = 'failed'; item.error = e.message; say(e.message, 'bad'); }
+      progress(null); renderSent();
+    }
+    if (ok) say(`Sent ${ok} ${ok === 1 ? 'file' : 'files'} to ${PC} ✓`, 'ok');
+  };
+
+  /* ------------------------------------------------------- from the PC */
+  const inbox = new Map();   // id → item
+  const parts = new Map();   // id → Map(i → url)
+  function renderInbox() {
+    const items = [...inbox.values()].sort((a, b) => b.at - a.at);
+    const ul = $('inbox');
+    if (!items.length) return;
+    ul.replaceChildren(...items.map((it) => {
+      const li = document.createElement('li');
+      if (it.preview) { const img = document.createElement('img'); img.src = it.preview; img.alt = ''; li.append(img); }
+      const body = document.createElement('div'); body.className = 'body';
+      const name = document.createElement('div'); name.className = 'name'; name.textContent = it.kind === 'text' ? it.text : it.name;
+      const meta = document.createElement('div'); meta.className = 'meta';
+      meta.textContent = it.kind === 'text' ? new Date(it.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+        : it.ready ? fmt(it.size) : `Arriving… ${it.got}/${it.n}`;
+      body.append(name, meta); li.append(body);
+      const btn = document.createElement('button');
+      if (it.kind === 'text') {
+        const isLink = /^https?:\/\/\S+$/i.test(it.text);
+        btn.textContent = isLink ? 'Open' : 'Copy';
+        btn.onclick = async () => { if (isLink) location.href = it.text; else { try { await navigator.clipboard.writeText(it.text); btn.textContent = 'Copied'; } catch { btn.textContent = 'Select & copy'; } } };
+      } else {
+        btn.textContent = it.blobUrl ? 'Save' : 'Download';
+        btn.disabled = !it.ready;
+        btn.onclick = () => download(it, btn);
+      }
+      li.append(btn);
+      return li;
+    }));
+  }
+
+  async function download(it, btn) {
+    if (!it.blobUrl) {
+      btn.textContent = 'Downloading…'; btn.disabled = true;
+      try {
+        const chunks = [];
+        for (let i = 0; i < it.n; i++) {
+          const res = await fetch(parts.get(it.id).get(i));
+          if (!res.ok) throw new Error(res.status === 404 ? 'This file expired on the relay (after 3 hours). Send it again from your PC.' : 'Download failed.');
+          const plain = await unseal(new Uint8Array(await res.arrayBuffer()));
+          if (!plain) throw new Error('The file couldn’t be decrypted.');
+          chunks.push(plain);
+        }
+        const blob = new Blob(chunks, { type: it.mime || 'application/octet-stream' });
+        if (it.sha && hex(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer())) !== it.sha) throw new Error('The file arrived damaged.');
+        it.blobUrl = URL.createObjectURL(blob);
+        if (/^image\//.test(it.mime)) it.preview = it.blobUrl;
+      } catch (e) { say(e.message, 'bad'); btn.textContent = 'Download'; btn.disabled = false; return; }
+      renderInbox();
+    }
+    const a = document.createElement('a');
+    a.href = it.blobUrl; a.download = it.name; document.body.append(a); a.click(); a.remove();
+  }
+
+  async function onEvent(ev) {
+    if (ev.event !== 'message') return;
+    const p = await unwire(ev.message);
+    if (!p) return;
+    if (p.from === 'pc' && p.t === 'ack') {
+      for (const s of sent) if ((p.ids || []).includes(s.id)) s.status = 'delivered';
+      renderSent(); return;
+    }
+    if (p.from !== 'pc') return;
+    if (p.t === 'text') { inbox.set(p.id, { id: p.id, kind: 'text', text: String(p.text || ''), at: p.at || Date.now() }); renderInbox(); return; }
+    if (p.t === 'part' && ev.attachment && ev.attachment.url) {
+      if (!parts.has(p.id)) parts.set(p.id, new Map());
+      parts.get(p.id).set(Number(p.i) || 0, ev.attachment.url);
+      const got = parts.get(p.id).size, n = Math.max(1, Number(p.n) || 1);
+      const mime = p.mime || (/\.(jpe?g)$/i.test(p.name) ? 'image/jpeg' : /\.png$/i.test(p.name) ? 'image/png' : /\.gif$/i.test(p.name) ? 'image/gif' : /\.webp$/i.test(p.name) ? 'image/webp' : '');
+      const prev = inbox.get(p.id) || {};
+      inbox.set(p.id, { ...prev, id: p.id, kind: 'file', name: String(p.name || 'file'), size: p.size, mime, sha: p.sha, n, got, ready: got >= n, at: p.at || Date.now() });
+      renderInbox();
+    }
+  }
+
+  // Live updates (Server-Sent Events). Replays the last 12 hours on connect.
+  let seen = new Set();
+  function connect() {
+    const es = new EventSource(`${SERVER}/${topic}/sse?since=12h`);
+    es.onopen = () => { $('dot').className = 'dot on'; $('sub').textContent = 'Connected to ' + PC; };
+    es.onmessage = (m) => { try { const ev = JSON.parse(m.data); if (seen.has(ev.id)) return; seen.add(ev.id); onEvent(ev); } catch {} };
+    es.onerror = () => { $('dot').className = 'dot'; $('sub').textContent = 'Reconnecting…'; };
+  }
+  connect();
+})();
+</script>
+</body>
+</html>
